@@ -10,6 +10,27 @@ type Group struct {
 	actors []actor
 }
 
+func (g *Group) Add(run func(context.Context) error, interrupt func(error)) {
+	g.mu.Lock()
+	g.actors = append(g.actors, newActor(run, interrupt))
+	g.mu.Unlock()
+}
+
+func (g *Group) Run() error {
+	g.mu.RLock()
+	var runCtx runContext
+	runCtx.registered = &sync.WaitGroup{}
+	runCtx.started = &sync.WaitGroup{}
+	for _, a := range g.actors {
+		runCtx.units = append(runCtx.units, &unit{
+			actor:  a,
+			runCtx: &runCtx,
+		})
+	}
+	g.mu.RUnlock()
+	return runCtx.run()
+}
+
 type unit struct {
 	runCtx *runContext
 	actor  actor
@@ -21,7 +42,7 @@ type runContext struct {
 	units      []*unit
 }
 
-func (r *runContext) Run() error {
+func (r *runContext) run() error {
 	if len(r.units) == 0 {
 		return nil
 	}
@@ -53,27 +74,6 @@ func (r *runContext) Run() error {
 		<-errors
 	}
 	return err
-}
-
-func (g *Group) Add(run func(context.Context) error, interrupt func(error)) {
-	g.mu.Lock()
-	g.actors = append(g.actors, newActor(run, interrupt))
-	g.mu.Unlock()
-}
-
-func (g *Group) Run() error {
-	g.mu.RLock()
-	var runCtx runContext
-	runCtx.registered = &sync.WaitGroup{}
-	runCtx.started = &sync.WaitGroup{}
-	for _, a := range g.actors {
-		runCtx.units = append(runCtx.units, &unit{
-			actor:  a,
-			runCtx: &runCtx,
-		})
-	}
-	g.mu.RUnlock()
-	return runCtx.Run()
 }
 
 func newActor(exec func(context.Context) error, cancel func(error)) actor {
